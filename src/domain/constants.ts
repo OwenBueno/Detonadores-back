@@ -1,0 +1,2 @@
+export const TICK_INTERVAL_MS = 50;
+export const TICKS_PER_SECOND = 1000 / TICK_INTERVAL_MS;
