@@ -9,11 +9,13 @@ import { InMemoryMatchStore, InMemoryRoomStore } from "../store/index.js";
 import { PostgresMatchRepository } from "../persistence/index.js";
 import { WsEventBroadcaster } from "../broadcast/WsEventBroadcaster.js";
 import { WsGateway } from "../websocket/WsGateway.js";
+import { GuestSessionService } from "../../application/GuestSessionService.js";
 
 const app = express();
 const port = process.env.PORT ?? 3001;
 
 app.use(cors({ origin: true }));
+app.use(express.json());
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
@@ -34,6 +36,11 @@ app.get("/rooms", async (_req, res) => {
   res.status(200).json({ rooms });
 });
 
+app.post("/session/guest", (_req, res) => {
+  const { token, guestId } = guestSessionService.createGuestSession();
+  res.status(201).json({ token, guestId });
+});
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: "/ws" });
 
@@ -42,6 +49,7 @@ const matchStore = new InMemoryMatchStore();
 const roomStore = new InMemoryRoomStore();
 const matchmakingQueue = new MatchmakingQueue();
 const matchRepository = new PostgresMatchRepository();
+const guestSessionService = new GuestSessionService();
 
 const matchService = new MatchService("room-0", "match-0", {
   eventBroadcaster: broadcaster,
@@ -114,6 +122,7 @@ const gateway = new WsGateway({
   matchService,
   broadcaster,
   roomStore,
+  guestSessionService,
   roomId: "room-0",
   maxPlayers: WS_MAX_CONNECTIONS,
   minPlayersToStart: MIN_PLAYERS_TO_START,

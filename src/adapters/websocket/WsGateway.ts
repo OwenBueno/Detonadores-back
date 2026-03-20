@@ -1,5 +1,7 @@
+import type { IncomingMessage } from "node:http";
 import type WebSocket from "ws";
 import type { WebSocketServer } from "ws";
+import type { GuestSessionService } from "../../application/GuestSessionService.js";
 import type { MatchService } from "../../application/MatchService.js";
 import type { MatchmakingQueue } from "../../application/MatchmakingQueue.js";
 import { onWebSocketMessage } from "./index.js";
@@ -12,6 +14,7 @@ import type { CreateArenaResult, PlayerCount } from "../../domain/arena/index.js
 type ConnInfo = {
   connectionId: string;
   playerId: string;
+  guestId: string;
   roomId?: string;
   role?: "host" | "member";
 };
@@ -21,6 +24,7 @@ export interface WsGatewayDeps {
   matchService: MatchService;
   broadcaster: WsEventBroadcaster;
   roomStore: RoomStore;
+  guestSessionService: GuestSessionService;
   roomId: string;
   maxPlayers: number;
   minPlayersToStart: number;
@@ -42,7 +46,7 @@ export class WsGateway {
 
   constructor(deps: WsGatewayDeps) {
     this.deps = deps;
-    this.deps.wss.on("connection", (ws) => this.onConnection(ws));
+    this.deps.wss.on("connection", (ws, req) => this.onConnection(ws, req));
   }
 
   clearConnectionsForRoom(roomId: string): void {
@@ -54,7 +58,21 @@ export class WsGateway {
     }
   }
 
-  private onConnection(ws: WebSocket): void {
+  private onConnection(ws: WebSocket, req: IncomingMessage): void {
+    const url = new URL(req.url ?? "", "http://localhost");
+    const token = url.searchParams.get("token");
+    const session = this.deps.guestSessionService.validateToken(token);
+    if (!session) {
+      ws.send(
+        JSON.stringify({
+          type: "error",
+          payload: createErrorPayload(ERROR_CODES.UNAUTHORIZED, "Missing or invalid session token"),
+        } satisfies ServerMessage)
+      );
+      ws.close();
+      return;
+    }
+
     const playerIndex = this.connections.size;
     if (playerIndex >= this.deps.maxPlayers) {
       ws.send(
@@ -69,7 +87,12 @@ export class WsGateway {
 
     const connectionId = `c-${this.connSeq++}`;
     const playerId = `player-${playerIndex}`;
-    this.connections.set(ws, { connectionId, playerId, roomId: this.deps.roomId });
+    this.connections.set(ws, {
+      connectionId,
+      playerId,
+      guestId: session.guestId,
+      roomId: this.deps.roomId,
+    });
     this.connectionIdToWs.set(connectionId, ws);
     this.deps.broadcaster.addClient(this.deps.roomId, ws);
 
@@ -114,6 +137,11 @@ export class WsGateway {
     msg: ClientMessage,
     send: (msg: ServerMessage) => void
   ): void {
+    const conn = this.connections.get(ws);
+    if (!conn?.guestId) {
+      send({ type: "error", payload: createErrorPayload(ERROR_CODES.UNAUTHORIZED) });
+      return;
+    }
     switch (msg.type) {
       case "room:create":
         this.handleRoomCreate(ws, msg, send);

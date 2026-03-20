@@ -1,6 +1,6 @@
 import { MatchEngine } from "../domain/MatchEngine.js";
 import { TICK_INTERVAL_MS, RECONNECT_GRACE_MS } from "../domain/constants.js";
-import type { GridCell, PlayerState } from "../domain/types.js";
+import type { GridCell, MatchSnapshot, PlayerState } from "../domain/types.js";
 import type { EventBroadcaster } from "../ports/EventBroadcaster.js";
 import type { MatchRepository } from "../ports/MatchRepository.js";
 import type { MatchStore } from "../ports/MatchStore.js";
@@ -19,6 +19,7 @@ export class MatchService {
   private deps: MatchServiceDeps;
   private tickLoopId: ReturnType<typeof setInterval> | null = null;
   private reconnectGraceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private matchFinalized = false;
 
   constructor(roomId: string, matchId: string, deps: MatchServiceDeps) {
     this.roomId = roomId;
@@ -28,6 +29,7 @@ export class MatchService {
   }
 
   startMatch(initialGrid: GridCell[][], initialPlayers: PlayerState[]): void {
+    this.matchFinalized = false;
     this.clearReconnectGraceTimers();
     this.engine.startMatch(initialGrid, initialPlayers);
     this.broadcastSnapshot();
@@ -65,6 +67,10 @@ export class MatchService {
       if (p?.reconnectPending) {
         this.engine.forfeitDisconnectedPlayer(playerId);
         this.broadcastSnapshot();
+        const after = this.engine.getSnapshot();
+        if (after.status === "ended") {
+          this.finalizeEndedMatch(after);
+        }
       }
     }, RECONNECT_GRACE_MS);
     this.reconnectGraceTimers.set(playerId, timer);
@@ -85,27 +91,7 @@ export class MatchService {
     this.broadcastSnapshot();
 
     if (snapshot.status === "ended") {
-      this.clearReconnectGraceTimers();
-      if (this.tickLoopId !== null) {
-        clearInterval(this.tickLoopId);
-        this.tickLoopId = null;
-      }
-      const winnerId = snapshot.winnerId;
-      this.deps.eventBroadcaster.broadcastEvent(this.roomId, {
-        type: "ended",
-        payload: { winnerId },
-      });
-      this.deps.matchRepository
-        .saveMatch({
-          matchId: this.matchId,
-          roomId: this.roomId,
-          snapshot,
-          winnerId,
-          finishedAt: new Date(),
-        })
-        .catch(() => {});
-      this.deps.matchStore.delete(this.roomId).catch(() => {});
-      this.deps.onMatchEnded?.(this.roomId);
+      this.finalizeEndedMatch(snapshot);
     } else {
       this.deps.matchStore
         .set({
@@ -120,6 +106,33 @@ export class MatchService {
 
   getSnapshot() {
     return this.engine.getSnapshot();
+  }
+
+  private finalizeEndedMatch(snapshot: MatchSnapshot): void {
+    if (this.matchFinalized) return;
+    if (snapshot.status !== "ended") return;
+    this.matchFinalized = true;
+    this.clearReconnectGraceTimers();
+    if (this.tickLoopId !== null) {
+      clearInterval(this.tickLoopId);
+      this.tickLoopId = null;
+    }
+    const winnerId = snapshot.winnerId;
+    this.deps.eventBroadcaster.broadcastEvent(this.roomId, {
+      type: "ended",
+      payload: { winnerId },
+    });
+    this.deps.matchRepository
+      .saveMatch({
+        matchId: this.matchId,
+        roomId: this.roomId,
+        snapshot,
+        winnerId,
+        finishedAt: new Date(),
+      })
+      .catch(() => {});
+    this.deps.matchStore.delete(this.roomId).catch(() => {});
+    this.deps.onMatchEnded?.(this.roomId);
   }
 
   private broadcastSnapshot(): void {
