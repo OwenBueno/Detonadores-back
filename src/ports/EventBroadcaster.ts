@@ -1,4 +1,5 @@
 import type { MatchSnapshot } from "../domain/types.js";
+import type { ServerMessage } from "../protocol/index.js";
 
 export type MatchEventType = "snapshot" | "event" | "ended";
 
@@ -8,6 +9,7 @@ export interface MatchEvent {
 }
 
 export interface EventBroadcaster {
-  broadcastSnapshot(snapshot: MatchSnapshot): void;
-  broadcastEvent(event: MatchEvent): void;
+  broadcastSnapshot(roomId: string, snapshot: MatchSnapshot): void;
+  broadcastEvent(roomId: string, event: MatchEvent): void;
+  sendToRoom(roomId: string, message: ServerMessage): void;
 }

@@ -82,7 +82,9 @@ During an active match, the authoritative state lives in memory (and optionally 
 
 The match simulation tick loop runs at **about 20Hz** (target ~50ms per tick). The engine exposes `tick()` and does not run timers; the application layer (or adapter) runs a ~20Hz loop that calls `tick()` when a match is active and then broadcasts the snapshot. The tick interval constant is defined in code (e.g. `TICK_INTERVAL_MS`) so 20Hz is explicit and changeable in one place.
 
-**Match lifecycle states:** The engine supports `waiting`, `starting`, `active`, and `ended`. A match starts only when at least two players are present; the first tick after start transitions `starting` to `active`. When one or zero players remain alive, the engine sets status to `ended` and stores `winnerId` (exposed in every snapshot after end). The application broadcasts `match:ended` with `winnerId` when the match finishes.
+**Snapshot emission:** The server emits `match:snapshot` at the same rate as the simulation tick (~20Hz, `TICK_INTERVAL_MS`). The payload is the full `MatchSnapshot` (grid, players, bombs, explosions, powerups, status, tick, winnerId) and is kept strictly to what is needed for rendering and state reconciliation on the client.
+
+**Match lifecycle states:** The engine supports `waiting`, `starting`, `active`, and `ended`. A match starts only when at least two players are present; the first tick after start transitions `starting` to `active`. When one or zero players remain alive, the engine sets status to `ended` and stores `winnerId` (exposed in every snapshot after end). `endMatch` is idempotent: once status is `ended`, subsequent calls are ignored and the first `winnerId` is preserved. The application observes the first transition to `ended`, broadcasts a single `match:ended` event with `winnerId`, and stops the tick loop so no further `match:snapshot` events are emitted for that match.
 
 **Explosion propagation:** Explosions spread in a cross (four cardinal directions) from the bomb origin up to the bomb’s range. Hard blocks stop propagation; soft blocks are destroyed (tile becomes floor) and stop propagation at that tile. Players on explosion tiles take damage once per explosion wave: if the player has an active shield (`shieldActive`), the shield is consumed and the player survives; otherwise the player is marked dead. The shield effect is intended to be set by powerups (e.g. US-013).
 
@@ -109,6 +111,24 @@ The match simulation tick loop runs at **about 20Hz** (target ~50ms per tick). T
 
 ---
 
-## 6. WebSocket message contract
+## 6. Rooms (lobby)
+
+Rooms are stored in memory via `RoomStore` (e.g. `InMemoryRoomStore`). Lifecycle: create (US-019) → waiting; join (US-020), ready (US-022), and synchronized match start (US-023) extend the flow.
+
+- **GET /rooms:** Returns joinable rooms (status `waiting`, `players.length < maxPlayers`) as summaries: `id`, `name?`, `playerCount`, `maxPlayers`, `status`. Clients use this to browse before joining.
+- **room:join:** The WebSocket gateway adds the client to the room in the store, attaches the socket to that room in the broadcaster, and sends `room:state` to all members of the room so everyone sees the updated player list.
+- **Character selection (lobby):** The lobby supports four character choices. A character can be held by at most one player in the room. If a player selects a character already taken by another player, the server rejects with `CHARACTER_TAKEN`. When a player disconnects, they are removed from the room so their character becomes available again.
+- **Ready (US-022):** Clients send `room:ready` with `{ ready: boolean }` to set their ready state. The server updates the player in the room and broadcasts `room:state` so all members see who is ready.
+- **Match start condition:** The match may only start when the documented minimum player count (e.g. 2 for MVP) is met and every player in the room has `ready === true`. US-023 enforces this when starting the match.
+- **Lock on start:** When the match starts (US-023), room status leaves `waiting`, so `room:join` rejects and the room is effectively locked to new joins.
+- **room:start_match (US-023):** A client in a created room sends `room:start_match`. The server checks that the room is `waiting`, has at least the minimum player count (e.g. 2), and that every player has `ready === true`. If not, it responds with an error (`NOT_ALL_READY`, `MIN_PLAYERS_NOT_MET`, or `ROOM_NOT_WAITING`). On success, the server sets the room status to `in_game`, creates or reuses a per-room `MatchService`, assigns `player-0` … `player-(n-1)` to connections by room player order, creates the arena with `createArena(playerCount)`, and starts the match. All clients in that room receive the same `match:snapshot` (initial and then every tick). Match input (`match:input`, `match:place_bomb`) is routed to the correct `MatchService` by the connection’s `roomId`.
+- **Per-room MatchService:** The app maintains a registry of `MatchService` instances keyed by `roomId`. The legacy default room (`room-0`) uses a single shared `MatchService`; created rooms get a new `MatchService` when the match starts. When a match ends, the service broadcasts `match:ended`, persists to `MatchRepository`, and invokes an `onMatchEnded` callback that removes the room from `RoomStore`, removes the service from the registry, and broadcasts `room:closed` to that room so clients return to the lobby. GET /rooms only returns rooms with status `waiting` and space available; finished rooms are no longer listed, but match records are kept in `MatchRepository`.
+- **On disconnect:** If the connection was in a created room (not the legacy default room), the server removes that player from the room in the store and broadcasts updated `room:state` to the remaining members. Empty rooms are removed from the store.
+
+Match execution is per-room from US-023 onward; the legacy default room continues to run a single shared match for backward compatibility.
+
+---
+
+## 7. WebSocket message contract
 
 WebSocket message contract (event types, payloads, error codes): see **`docs/websocket-contract.md`** at project root. Backend protocol types and parser live in `src/protocol/`; the WebSocket adapter uses them to parse incoming messages and send only the defined server event shapes.

@@ -9,6 +9,7 @@ export interface MatchServiceDeps {
   matchRepository: MatchRepository;
   eventBroadcaster: EventBroadcaster;
   matchStore: MatchStore;
+  onMatchEnded?: (roomId: string) => void;
 }
 
 export class MatchService {
@@ -31,6 +32,11 @@ export class MatchService {
     this.tickLoopId = setInterval(() => this.tick(), TICK_INTERVAL_MS);
   }
 
+  addPlayer(player: PlayerState): void {
+    this.engine.addPlayer(player);
+    this.broadcastSnapshot();
+  }
+
   applyInput(playerId: string, input: "up" | "down" | "left" | "right" | "place_bomb"): void {
     this.engine.applyInput(playerId, input);
   }
@@ -46,7 +52,7 @@ export class MatchService {
         this.tickLoopId = null;
       }
       const winnerId = snapshot.winnerId;
-      this.deps.eventBroadcaster.broadcastEvent({
+      this.deps.eventBroadcaster.broadcastEvent(this.roomId, {
         type: "ended",
         payload: { winnerId },
       });
@@ -60,6 +66,7 @@ export class MatchService {
         })
         .catch(() => {});
       this.deps.matchStore.delete(this.roomId).catch(() => {});
+      this.deps.onMatchEnded?.(this.roomId);
     } else {
       this.deps.matchStore
         .set({
@@ -77,6 +84,6 @@ export class MatchService {
   }
 
   private broadcastSnapshot(): void {
-    this.deps.eventBroadcaster.broadcastSnapshot(this.engine.getSnapshot());
+    this.deps.eventBroadcaster.broadcastSnapshot(this.roomId, this.engine.getSnapshot());
   }
 }

@@ -4,6 +4,8 @@ const CLIENT_MESSAGE_TYPES = [
   "room:create",
   "room:join",
   "room:ready",
+  "room:select_character",
+  "room:start_match",
   "match:input",
   "match:place_bomb",
   "matchmaking:join",
@@ -37,6 +39,16 @@ function parseRoomReady(payload: unknown): ClientMessage | null {
     type: "room:ready",
     payload: { ready: typeof payload.ready === "boolean" ? payload.ready : undefined },
   };
+}
+
+function parseRoomSelectCharacter(payload: unknown): ClientMessage | null {
+  if (!isObject(payload) || typeof payload.characterId !== "string") return null;
+  return { type: "room:select_character", payload: { characterId: payload.characterId } };
+}
+
+function parseRoomStartMatch(payload: unknown): ClientMessage | null {
+  if (!isObject(payload)) return null;
+  return { type: "room:start_match", payload: {} };
 }
 
 function parseMatchInput(payload: unknown): ClientMessage | null {
@@ -77,6 +89,10 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return parseRoomJoin(data.payload);
     case "room:ready":
       return parseRoomReady(data.payload);
+    case "room:select_character":
+      return parseRoomSelectCharacter(data.payload);
+    case "room:start_match":
+      return parseRoomStartMatch(data.payload);
     case "match:input":
       return parseMatchInput(data.payload);
     case "match:place_bomb":

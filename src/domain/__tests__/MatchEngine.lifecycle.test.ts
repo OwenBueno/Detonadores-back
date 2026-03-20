@@ -18,12 +18,12 @@ describe("MatchEngine", () => {
       expect(snapshot.explosions).toEqual([]);
     });
 
-    it("startMatch with one player leaves status waiting and does not start", () => {
+    it("startMatch with one player starts and has one player", () => {
       const engine = new MatchEngine();
       engine.startMatch([[c(0, 0, "floor")]], twoPlayers().slice(0, 1));
       const snapshot = engine.getSnapshot();
-      expect(snapshot.status).toBe("waiting");
-      expect(snapshot.players).toHaveLength(0);
+      expect(snapshot.status).toBe("starting");
+      expect(snapshot.players).toHaveLength(1);
     });
 
     it("startMatch sets status to starting and stores grid and players when at least 2 players", () => {

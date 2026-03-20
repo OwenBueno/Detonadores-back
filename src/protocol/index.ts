@@ -6,6 +6,7 @@ export type {
   RoomCreatePayload,
   RoomJoinPayload,
   RoomReadyPayload,
+  RoomSelectCharacterPayload,
   MatchInputPayload,
   MatchPlaceBombPayload,
   MatchmakingJoinPayload,
@@ -18,6 +19,8 @@ export type {
   ErrorCode,
 } from "./types.js";
 export { ERROR_CODES, createErrorPayload } from "./types.js";
+export { CHARACTER_IDS, isCharacterId } from "./constants.js";
+export type { CharacterId } from "./constants.js";
 export { parseClientMessage } from "./parse.js";
 
 import type { ClientMessage, ServerMessage } from "./types.js";

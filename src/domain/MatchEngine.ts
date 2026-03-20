@@ -14,7 +14,7 @@ import { SUDDEN_DEATH_START_TICK, getCollapseOrder } from "./suddenDeathConstant
 
 const EXPLOSION_DURATION_TICKS = 10;
 
-const MIN_PLAYERS_TO_START = 2;
+const MIN_PLAYERS_TO_START = 1;
 
 export class MatchEngine {
   private status: MatchStatus = "waiting";
@@ -96,7 +96,14 @@ export class MatchEngine {
     this.collapseIndex = 0;
   }
 
+  addPlayer(player: PlayerState): void {
+    if (this.status !== "starting" && this.status !== "active") return;
+    if (this.players.has(player.id)) return;
+    this.players.set(player.id, { ...player });
+  }
+
   endMatch(winnerId?: string): void {
+    if (this.status === "ended") return;
     this.status = "ended";
     this.winnerId = winnerId;
   }
@@ -318,9 +325,10 @@ export class MatchEngine {
 
   private checkWinCondition(): void {
     const alive = Array.from(this.players.values()).filter((p) => p.alive);
-    if (alive.length <= 1) {
-      const winnerId = alive.length === 1 ? alive[0]!.id : undefined;
-      this.endMatch(winnerId);
+    if (alive.length === 0) {
+      this.endMatch(undefined);
+    } else if (alive.length === 1 && this.players.size >= 2) {
+      this.endMatch(alive[0]!.id);
     }
   }
 }
