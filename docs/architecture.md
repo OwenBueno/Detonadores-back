@@ -2,7 +2,7 @@
 
 Technical stack and module boundaries for the backend. The match engine is authoritative and implemented as pure TypeScript with no renderer or transport dependencies.
 
-**Frontend renderer (project decision):** Phaser (recommended in project vision). Documented at project level; implementation is frontend scope.
+**Frontend renderer (project decision):** Phaser (recommended in project vision). Documented at project level; implementation is frontend scope. Character avatars in match and lobby use **client-only CSS** (see project `docs/mvp-character-css-sprites.md`); the backend does not serve sprite assets for MVP.
 
 ---
 
@@ -61,7 +61,7 @@ flowchart LR
 |-----------|----------------|
 | **Client** (out of scope for backend) | UI rendering, input capture, WebSocket client, interpolation. |
 | **Match engine** | Authoritative simulation; input queue; tick loop (~20Hz); produces snapshots/events. No I/O. Inputs are queued and resolved by the engine, not by the client view. |
-| **WebSocket adapter** | Translates client events to engine/application calls; subscribes to engine output; sends `match:snapshot`, `match:event`, `match:ended`. Validates a guest **session token** on each WebSocket upgrade (`/ws?token=…`); minted via **`POST /session/guest`** and held in an in-memory store for MVP (US-028). |
+| **WebSocket adapter** | Translates client events to engine/application calls; subscribes to engine output; sends `match:snapshot`, `match:event`, `match:ended`, and room chat (`chat:message`, US-051). Validates a **session token** on each WebSocket upgrade (`/ws?token=…`); minted via **`POST /session/guest`** (US-028) or auth flows (**US-045**–**US-046**); storage moves from in-memory to Postgres/Redis per EPIC-08/09/10. |
 | **Persistence layer** | Postgres adapters for durable data: users, sessions, rooms, room_players, matches, match_players. |
 | **Redis** | Live match state (e.g. current match id per room, session-to-match mapping for reconnect); may be complemented by in-process memory for single-server MVP. |
 
@@ -75,6 +75,23 @@ flowchart LR
 | **Memory / Redis** | Live match state (grid, players, bombs, timers); room presence; reconnect reservation | During active match. Postgres is **not** the source of truth for in-progress match simulation. |
 
 During an active match, the authoritative state lives in memory (and optionally Redis for multi-instance/reconnect). Postgres is written when a match ends or when room/lobby data is committed.
+
+### Current implementation vs backlog targets (EPIC-08, EPIC-09)
+
+| Area | Today (`src/adapters/http/app.ts` and related) | Target |
+|------|-----------------------------------------------|--------|
+| Match durable write | `PostgresMatchRepository.saveMatch` is a **stub** (no `pg` write) | **US-038–US-040:** schema, pool, real `saveMatch` |
+| `MatchStore` | `InMemoryMatchStore` | **US-042–US-043:** hybrid — tick/grid process-local; optional Redis metadata keys |
+| `RoomStore` | `InMemoryRoomStore` | Can remain in-memory on a single node; Redis optional for multi-instance room roster |
+| Guest sessions | `GuestSessionService` in memory | Optional migration to Redis or Postgres when sessions must survive deploys |
+| Matchmaking | In-process `MatchmakingQueue` | **US-044:** Redis-backed FIFO for US-024 semantics across instances |
+
+### Player stats and leaderboard cache (US-048–US-050)
+
+- **Postgres** holds durable per-player aggregates (US-048, US-049).
+- **Write path:** On match end, after match row persistence (US-040), increment aggregates with idempotency (US-049).
+- **Redis** caches hot reads for **`GET /stats/leaderboard`** and optional **`GET /stats/me`** (US-050) with TTL and/or invalidation on write.
+- **Identity:** Stat rows tie to guest and/or authenticated user id once **US-046** is implemented.
 
 ---
 
@@ -109,6 +126,8 @@ The match simulation tick loop runs at **about 20Hz** (target ~50ms per tick). T
 
 **Collapse rule:** When a tile collapses, any player on that tile is killed; any bomb on that tile is removed and its owner refunded one bomb; any powerup on that tile is removed. Collapse continues until the match has a winner (existing win condition). Collapsed tiles are non-walkable and block explosion propagation.
 
+**MVP arena (US-032):** Matches use one fixed 13×11 layout from `domain/arena/createArena` / `createArenaGrid` (no map id or selector). Spawns, border notches, inner soft-block pattern, and player-index-to-corner mapping are documented in **`docs/mvp-arena.md`** at project root.
+
 ---
 
 ## 6. Rooms (lobby)
@@ -128,7 +147,7 @@ Rooms are stored in memory via `RoomStore` (e.g. `InMemoryRoomStore`). Lifecycle
 - **Reconnect (US-026):** Clients send **`match:reconnect`** with `roomId` and `seatConnectionId` (their `room:identity` / `RoomPlayer.id`) from the default lobby. The server validates `in_game` room + active match + `reconnectPending`, calls `MatchService.onPlayerReconnected`, re-attaches the WebSocket to the match room channel, and sends an immediate **`match:snapshot`**. **`room:identity`** is unicast when entering a created room so the client can persist resume data. Reconnect is not supported for legacy `room-0`-only matches without a `RoomStore` row.
 - **Grace expiry / abandoned seat (US-027):** If the player does not reconnect before the grace timer fires, `MatchService` forfeits the seat (`alive: false`, pending cleared). The simulation outcome is the same as if that player had been eliminated in-game; there is no duplicate `player-N`. A successful reconnect (US-026) reuses the same slot and clears the timer before forfeit.
 
-**Matchmaking (US-024):** A single in-process FIFO queue groups **2–4** players per batch: when a join brings the queue length to **≥ 2**, the server dequeues **`min(length, 4)`** IDs and creates one **`waiting`** room (first ID is host, rest are members). There is no auto-start; the normal ready + `room:start_match` flow applies. Clients use `matchmaking:join` / `matchmaking:leave`; the server may send `matchmaking:status`. If fewer than two sockets remain when forming a batch, survivors are re-enqueued. A future multi-instance deployment would replace the in-memory queue with a shared implementation (e.g. Redis).
+**Matchmaking (US-024, US-044):** A **FIFO** queue groups **2–4** players per batch: when a join brings the queue length to **≥ 2**, the server dequeues **`min(length, 4)`** IDs and creates one **`waiting`** room (first ID is host, rest are members). There is no auto-start; the normal ready + `room:start_match` flow applies. Clients use `matchmaking:join` / `matchmaking:leave`; the server may send `matchmaking:status`. If fewer than two sockets remain when forming a batch, survivors are re-enqueued. Today the queue is **in-process**; **US-044** introduces a **Redis-backed** queue for the same semantics across multiple Node instances.
 
 Match execution is per-room from US-023 onward; the legacy default room continues to run a single shared match for backward compatibility.
 

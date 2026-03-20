@@ -388,7 +388,12 @@ export class WsGateway {
         Math.min(4, room.players.length)
       ) as PlayerCount;
       const { grid, initialPlayers } = this.deps.createArena(playerCount);
-      matchService.startMatch(grid, initialPlayers);
+      const playersWithCosmetics = initialPlayers.map((pl, i) => {
+        const cid = room.players[i]?.characterId;
+        if (cid == null || cid === "" || !isCharacterId(cid)) return pl;
+        return { ...pl, characterId: cid };
+      });
+      matchService.startMatch(grid, playersWithCosmetics);
       const updated = await this.deps.roomStore.get(roomId);
       if (updated) {
         this.deps.broadcaster.sendToRoom(roomId, {

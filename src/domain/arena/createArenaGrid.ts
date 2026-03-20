@@ -7,6 +7,7 @@ import {
   isSpawnZone,
 } from "./constants.js";
 
+/** MVP v1 layout (US-032); documented in repo root docs/mvp-arena.md — mirror changes in Detonadores-web offline createArenaGrid. */
 function cellType(x: number, y: number): "floor" | "hard_block" | "soft_block" {
   if (isSpawnZone(x, y)) return "floor";
   if (isBorder(x, y)) return "hard_block";

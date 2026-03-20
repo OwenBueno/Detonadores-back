@@ -67,5 +67,21 @@ describe("MatchEngine", () => {
       expect(snapshot.status).toBe("ended");
       expect(snapshot.winnerId).toBe("p1");
     });
+
+    it("preserves cosmetic characterId on players across ticks (US-033)", () => {
+      const { grid, initialPlayers } = createArena(2);
+      const withCosmetics = initialPlayers.map((p, i) => ({
+        ...p,
+        characterId: i === 0 ? "char_1" : "char_2",
+      }));
+      const engine = new MatchEngine();
+      engine.startMatch(grid, withCosmetics);
+      engine.tick();
+      expect(engine.getSnapshot().players[0]?.characterId).toBe("char_1");
+      expect(engine.getSnapshot().players[1]?.characterId).toBe("char_2");
+      engine.tick();
+      expect(engine.getSnapshot().players[0]?.characterId).toBe("char_1");
+      expect(engine.getSnapshot().players[1]?.characterId).toBe("char_2");
+    });
   });
 });

@@ -19,6 +19,11 @@ export interface PlayerState {
   shieldActive?: boolean;
   /** True while WebSocket is gone and grace window has not expired (US-025). */
   reconnectPending?: boolean;
+  /**
+   * Lobby cosmetic only (US-033). Not used by movement, bombs, explosions, or powerups.
+   * Propagated in snapshots for client tinting.
+   */
+  characterId?: string;
 }
 
 export interface BombState {

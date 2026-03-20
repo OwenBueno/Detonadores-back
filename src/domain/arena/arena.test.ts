@@ -67,6 +67,17 @@ describe("arena", () => {
         }
       }
     });
+
+    it("v1 MVP layout has sixteen inner soft blocks (documented in docs/mvp-arena.md)", () => {
+      const grid = createArenaGrid();
+      let soft = 0;
+      for (const row of grid) {
+        for (const cell of row) {
+          if (cell.type === "soft_block") soft++;
+        }
+      }
+      expect(soft).toBe(16);
+    });
   });
 
   describe("createArena", () => {
