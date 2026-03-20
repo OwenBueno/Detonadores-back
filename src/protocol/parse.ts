@@ -8,7 +8,9 @@ const CLIENT_MESSAGE_TYPES = [
   "room:start_match",
   "match:input",
   "match:place_bomb",
+  "match:reconnect",
   "matchmaking:join",
+  "matchmaking:leave",
 ] as const;
 
 const MOVEMENT_INPUTS = ["up", "down", "left", "right"] as const;
@@ -62,6 +64,15 @@ function parseMatchPlaceBomb(payload: unknown): ClientMessage | null {
   return { type: "match:place_bomb", payload: {} };
 }
 
+function parseMatchReconnect(payload: unknown): ClientMessage | null {
+  if (!isObject(payload)) return null;
+  if (typeof payload.roomId !== "string" || typeof payload.seatConnectionId !== "string") return null;
+  return {
+    type: "match:reconnect",
+    payload: { roomId: payload.roomId, seatConnectionId: payload.seatConnectionId },
+  };
+}
+
 function parseMatchmakingJoin(payload: unknown): ClientMessage | null {
   if (!isObject(payload)) return null;
   return {
@@ -70,6 +81,11 @@ function parseMatchmakingJoin(payload: unknown): ClientMessage | null {
       preferredRole: typeof payload.preferredRole === "string" ? payload.preferredRole : undefined,
     },
   };
+}
+
+function parseMatchmakingLeave(payload: unknown): ClientMessage | null {
+  if (!isObject(payload)) return null;
+  return { type: "matchmaking:leave", payload: {} };
 }
 
 export function parseClientMessage(raw: string): ClientMessage | null {
@@ -97,8 +113,12 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return parseMatchInput(data.payload);
     case "match:place_bomb":
       return parseMatchPlaceBomb(data.payload);
+    case "match:reconnect":
+      return parseMatchReconnect(data.payload);
     case "matchmaking:join":
       return parseMatchmakingJoin(data.payload);
+    case "matchmaking:leave":
+      return parseMatchmakingLeave(data.payload);
     default:
       return null;
   }

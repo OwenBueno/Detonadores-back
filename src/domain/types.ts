@@ -17,6 +17,8 @@ export interface PlayerState {
   range: number;
   speed?: number;
   shieldActive?: boolean;
+  /** True while WebSocket is gone and grace window has not expired (US-025). */
+  reconnectPending?: boolean;
 }
 
 export interface BombState {

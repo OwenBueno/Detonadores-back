@@ -3,6 +3,7 @@ import cors from "cors";
 import http from "node:http";
 import { WebSocketServer } from "ws";
 import { MatchService } from "../../application/MatchService.js";
+import { MatchmakingQueue } from "../../application/MatchmakingQueue.js";
 import { createArena, type PlayerCount } from "../../domain/arena/index.js";
 import { InMemoryMatchStore, InMemoryRoomStore } from "../store/index.js";
 import { PostgresMatchRepository } from "../persistence/index.js";
@@ -39,6 +40,7 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 const broadcaster = new WsEventBroadcaster();
 const matchStore = new InMemoryMatchStore();
 const roomStore = new InMemoryRoomStore();
+const matchmakingQueue = new MatchmakingQueue();
 const matchRepository = new PostgresMatchRepository();
 
 const matchService = new MatchService("room-0", "match-0", {
@@ -104,13 +106,16 @@ function onConnectionCountChanged(count: number) {
 
 const MIN_PLAYERS_TO_START = 2;
 
+/** Max simultaneous WebSocket connections (default lobby + matchmaking needs >2). */
+const WS_MAX_CONNECTIONS = 32;
+
 const gateway = new WsGateway({
   wss,
   matchService,
   broadcaster,
   roomStore,
   roomId: "room-0",
-  maxPlayers: 2,
+  maxPlayers: WS_MAX_CONNECTIONS,
   minPlayersToStart: MIN_PLAYERS_TO_START,
   startMatchIfNeeded,
   getMatchService,
@@ -118,6 +123,10 @@ const gateway = new WsGateway({
   getOrCreateMatchService,
   createArena,
   onConnectionCountChanged,
+  matchmakingQueue,
+  onMatchPlayerDisconnected(roomId, playerId) {
+    getMatchService(roomId)?.onPlayerDisconnected(playerId);
+  },
 });
 gatewayRef.current = gateway;
 

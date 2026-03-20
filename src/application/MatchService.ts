@@ -1,5 +1,5 @@
 import { MatchEngine } from "../domain/MatchEngine.js";
-import { TICK_INTERVAL_MS } from "../domain/constants.js";
+import { TICK_INTERVAL_MS, RECONNECT_GRACE_MS } from "../domain/constants.js";
 import type { GridCell, PlayerState } from "../domain/types.js";
 import type { EventBroadcaster } from "../ports/EventBroadcaster.js";
 import type { MatchRepository } from "../ports/MatchRepository.js";
@@ -18,6 +18,7 @@ export class MatchService {
   private matchId: string;
   private deps: MatchServiceDeps;
   private tickLoopId: ReturnType<typeof setInterval> | null = null;
+  private reconnectGraceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(roomId: string, matchId: string, deps: MatchServiceDeps) {
     this.roomId = roomId;
@@ -27,9 +28,46 @@ export class MatchService {
   }
 
   startMatch(initialGrid: GridCell[][], initialPlayers: PlayerState[]): void {
+    this.clearReconnectGraceTimers();
     this.engine.startMatch(initialGrid, initialPlayers);
     this.broadcastSnapshot();
     this.tickLoopId = setInterval(() => this.tick(), TICK_INTERVAL_MS);
+  }
+
+  onPlayerReconnected(playerId: string): boolean {
+    const status = this.engine.getSnapshot().status;
+    if (status === "ended" || status === "waiting") return false;
+    const snap = this.engine.getSnapshot();
+    const p = snap.players.find((x) => x.id === playerId);
+    if (!p || !p.alive || !p.reconnectPending) return false;
+    const existing = this.reconnectGraceTimers.get(playerId);
+    if (existing !== undefined) {
+      clearTimeout(existing);
+      this.reconnectGraceTimers.delete(playerId);
+    }
+    this.engine.setPlayerReconnectPending(playerId, false);
+    this.broadcastSnapshot();
+    return true;
+  }
+
+  onPlayerDisconnected(playerId: string): void {
+    const status = this.engine.getSnapshot().status;
+    if (status === "ended" || status === "waiting") return;
+    const existing = this.reconnectGraceTimers.get(playerId);
+    if (existing !== undefined) clearTimeout(existing);
+    this.engine.setPlayerReconnectPending(playerId, true);
+    this.broadcastSnapshot();
+    const timer = setTimeout(() => {
+      this.reconnectGraceTimers.delete(playerId);
+      const snap = this.engine.getSnapshot();
+      if (snap.status === "ended") return;
+      const p = snap.players.find((x) => x.id === playerId);
+      if (p?.reconnectPending) {
+        this.engine.forfeitDisconnectedPlayer(playerId);
+        this.broadcastSnapshot();
+      }
+    }, RECONNECT_GRACE_MS);
+    this.reconnectGraceTimers.set(playerId, timer);
   }
 
   addPlayer(player: PlayerState): void {
@@ -47,6 +85,7 @@ export class MatchService {
     this.broadcastSnapshot();
 
     if (snapshot.status === "ended") {
+      this.clearReconnectGraceTimers();
       if (this.tickLoopId !== null) {
         clearInterval(this.tickLoopId);
         this.tickLoopId = null;
@@ -85,5 +124,10 @@ export class MatchService {
 
   private broadcastSnapshot(): void {
     this.deps.eventBroadcaster.broadcastSnapshot(this.roomId, this.engine.getSnapshot());
+  }
+
+  private clearReconnectGraceTimers(): void {
+    for (const t of this.reconnectGraceTimers.values()) clearTimeout(t);
+    this.reconnectGraceTimers.clear();
   }
 }

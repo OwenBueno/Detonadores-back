@@ -8,7 +8,9 @@ export type ClientMessageType =
   | "room:start_match"
   | "match:input"
   | "match:place_bomb"
-  | "matchmaking:join";
+  | "match:reconnect"
+  | "matchmaking:join"
+  | "matchmaking:leave";
 
 export interface RoomCreatePayload {
   roomName?: string;
@@ -37,9 +39,17 @@ export interface MatchPlaceBombPayload {
   // empty
 }
 
+export interface MatchReconnectPayload {
+  roomId: string;
+  /** Same as `RoomPlayer.id` / server connection id for this seat. */
+  seatConnectionId: string;
+}
+
 export interface MatchmakingJoinPayload {
   preferredRole?: string;
 }
+
+export type MatchmakingLeavePayload = Record<string, never>;
 
 export type ClientMessage =
   | { type: "room:create"; payload: RoomCreatePayload }
@@ -49,14 +59,22 @@ export type ClientMessage =
   | { type: "room:start_match"; payload: RoomStartMatchPayload }
   | { type: "match:input"; payload: MatchInputPayload }
   | { type: "match:place_bomb"; payload: MatchPlaceBombPayload }
-  | { type: "matchmaking:join"; payload: MatchmakingJoinPayload };
+  | { type: "match:reconnect"; payload: MatchReconnectPayload }
+  | { type: "matchmaking:join"; payload: MatchmakingJoinPayload }
+  | { type: "matchmaking:leave"; payload: MatchmakingLeavePayload };
+
+export interface MatchmakingStatusPayload {
+  status: "idle" | "queued";
+}
 
 export type ServerMessageType =
   | "room:state"
+  | "room:identity"
   | "room:closed"
   | "match:snapshot"
   | "match:event"
   | "match:ended"
+  | "matchmaking:status"
   | "error";
 
 export interface RoomPlayer {
@@ -72,6 +90,11 @@ export interface RoomStatePayload {
   roomId: string;
   players: RoomPlayer[];
   status: RoomStatus;
+}
+
+/** Unicast: this connection's stable id for room roster / match:reconnect (US-026). */
+export interface RoomIdentityPayload {
+  connectionId: string;
 }
 
 export interface MatchEventPayload {
@@ -97,6 +120,8 @@ export const ERROR_CODES = {
   MIN_PLAYERS_NOT_MET: "MIN_PLAYERS_NOT_MET",
   NOT_ALL_READY: "NOT_ALL_READY",
   ROOM_NOT_WAITING: "ROOM_NOT_WAITING",
+  RECONNECT_FAILED: "RECONNECT_FAILED",
+  RECONNECT_SEAT_TAKEN: "RECONNECT_SEAT_TAKEN",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -108,10 +133,12 @@ export interface ErrorPayload {
 
 export type ServerMessage =
   | { type: "room:state"; payload: RoomStatePayload }
+  | { type: "room:identity"; payload: RoomIdentityPayload }
   | { type: "room:closed"; payload: RoomClosedPayload }
   | { type: "match:snapshot"; payload: MatchSnapshot }
   | { type: "match:event"; payload: MatchEventPayload }
   | { type: "match:ended"; payload: MatchEndedPayload }
+  | { type: "matchmaking:status"; payload: MatchmakingStatusPayload }
   | { type: "error"; payload: ErrorPayload };
 
 export function createErrorPayload(code: ErrorCode, message?: string): ErrorPayload {

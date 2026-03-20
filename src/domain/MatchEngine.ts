@@ -102,6 +102,29 @@ export class MatchEngine {
     this.players.set(player.id, { ...player });
   }
 
+  setPlayerReconnectPending(playerId: string, pending: boolean): void {
+    if (this.status !== "starting" && this.status !== "active") return;
+    const p = this.players.get(playerId);
+    if (!p) return;
+    if (pending) {
+      this.players.set(playerId, { ...p, reconnectPending: true });
+    } else {
+      const next = { ...p };
+      delete next.reconnectPending;
+      this.players.set(playerId, next);
+    }
+  }
+
+  forfeitDisconnectedPlayer(playerId: string): void {
+    if (this.status !== "starting" && this.status !== "active") return;
+    const p = this.players.get(playerId);
+    if (!p || !p.alive) return;
+    const next = { ...p, alive: false };
+    delete next.reconnectPending;
+    this.players.set(playerId, next);
+    this.checkWinCondition();
+  }
+
   endMatch(winnerId?: string): void {
     if (this.status === "ended") return;
     this.status = "ended";
@@ -110,7 +133,7 @@ export class MatchEngine {
 
   private resolveInput(playerId: string, input: PlayerInput): void {
     let player = this.players.get(playerId);
-    if (!player || !player.alive) return;
+    if (!player || !player.alive || player.reconnectPending) return;
 
     if (input === "place_bomb") {
       if (player.bombs > 0) {

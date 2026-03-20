@@ -24,4 +24,17 @@ describe("parseClientMessage", () => {
   it("returns null for unknown message type", () => {
     expect(parseClientMessage(JSON.stringify({ type: "unknown", payload: {} }))).toBeNull();
   });
+
+  it("parses match:reconnect", () => {
+    const msg = parseClientMessage(
+      JSON.stringify({
+        type: "match:reconnect",
+        payload: { roomId: "rid", seatConnectionId: "c-1" },
+      })
+    );
+    expect(msg?.type).toBe("match:reconnect");
+    expect(
+      msg && msg.type === "match:reconnect" ? msg.payload.roomId : null
+    ).toBe("rid");
+  });
 });
